@@ -11,7 +11,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include "img4.h"
+
+#include <libgeneral/macros.h>
+#ifdef HAVE_IMG4TOOL
+#include <img4tool/img4tool.hpp>
+#endif //HAVE_IMG4TOOL
 
 using namespace tihmstar::offsetfinder64;
 
@@ -122,42 +126,52 @@ machopatchfinder64::machopatchfinder64(const char *filename) :
 {
     struct stat fs = {0};
     int fd = 0;
-    char *img4tmp = NULL;
     bool didConstructSuccessfully = false;
+#ifdef HAVE_IMG4TOOL
+    img4tool::ASN1DERElement *img4tmp = NULL;
+#endif //HAVE_IMG4TOOL
     cleanup([&]{
         if (fd>0) close(fd);
         if (!didConstructSuccessfully) {
-            safeFree(_buf);
+            safeFreeConst(_buf);
         }
+#ifdef HAVE_IMG4TOOL
+        if (img4tmp) {
+            delete img4tmp;
+        }
+#endif //HAVE_IMG4TOOL
     })
     
     assure((fd = open(filename, O_RDONLY)) != -1);
     assure(!fstat(fd, &fs));
     assure((_buf = (uint8_t*)malloc( _bufSize = fs.st_size)));
-    assure(read(fd,_buf,_bufSize)==_bufSize);
+    assure(read(fd,(void*)_buf,_bufSize)==_bufSize);
     
+    
+#ifdef HAVE_IMG4TOOL
     //check if feedfacf, fat, compressed (lzfse/lzss), img4, im4p
-    img4tmp = (char*)_buf;
-    if (sequenceHasName(img4tmp, (char*)"IMG4")){
-        img4tmp = getElementFromIMG4((char*)_buf, (char*)"IM4P");
+    try {
+        img4tmp = new img4tool::ASN1DERElement(_buf,_bufSize);
+    } catch (...) {
+        //
     }
-    if (sequenceHasName(img4tmp, (char*)"IM4P")){
-        char *extracted = NULL;
-        {
-            size_t klen;
-            const char* compname;
-    
-            extracted = extractPayloadFromIM4P(img4tmp, &compname, &klen);
-    
-            if (compname) {
-                printf("%s comp detected, uncompressing : %s ...\n", compname, extracted ? "success" : "failure");
-            }
+    if (img4tmp) {
+        if (img4tool::isIMG4(*img4tmp)) {
+            *img4tmp = img4tool::getIM4PFromIMG4(*img4tmp);
         }
-        if (extracted) {
-            free(_buf);
-            _buf = (uint8_t*)extracted;extracted = NULL;
+        if (img4tool::isIM4P(*img4tmp)) {
+            *img4tmp = img4tool::getPayloadFromIM4P(*img4tmp);
+            
+            assure(img4tmp->ownsBuffer());
+            free((void*)_buf);
+            
+            assure(_buf = (uint8_t*)malloc(_bufSize = img4tmp->size()));
+            memcpy((void*)_buf, img4tmp->buf(), _bufSize);
         }
     }
+#else
+    printf("Warning: compiled without img4tool, extracting from IMG4/IM4P disabled!\n");
+#endif //HAVE_IMG4TOOL
     
     if (*(uint32_t*)_buf == 0xbebafeca || *(uint32_t*)_buf == 0xcafebabe) {
         bool swap = *(uint32_t*)_buf == 0xbebafeca;
@@ -192,7 +206,7 @@ machopatchfinder64::machopatchfinder64(const char *filename) :
     
         if (tryfat) {
             printf("got fat macho with first slice at %u\n", (uint32_t) (tryfat - _buf));
-            free(_buf);
+            free((void*)_buf);
             _buf = tryfat;tryfat = NULL;
         } else {
             printf("got fat macho but failed to parse\n");
@@ -208,8 +222,8 @@ machopatchfinder64::machopatchfinder64(const char *filename) :
 
 
 loc_t machopatchfinder64::find_sym(const char *sym){
-    uint8_t *psymtab = _buf + getSymtab()->symoff;
-    uint8_t *pstrtab = _buf + getSymtab()->stroff;
+    const uint8_t *psymtab = _buf + getSymtab()->symoff;
+    const uint8_t *pstrtab = _buf + getSymtab()->stroff;
     
     struct nlist_64 *entry = (struct nlist_64 *)psymtab;
     for (uint32_t i = 0; i < getSymtab()->nsyms; i++, entry++)

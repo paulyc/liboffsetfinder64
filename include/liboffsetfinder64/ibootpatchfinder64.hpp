@@ -23,9 +23,10 @@ namespace tihmstar {
             uint32_t _vers;
         public:
             ibootpatchfinder64(const char *filename);
-            
-            bool has_kernel_load();
-            bool has_recovery_console();
+            ibootpatchfinder64(const void *buffer, size_t bufSize);
+
+            bool has_kernel_load() noexcept;
+            bool has_recovery_console() noexcept;
 
             std::vector<patch> get_boot_arg_patch(const char *bootargs);
             std::vector<patch> get_debug_enabled_patch();
