@@ -8,7 +8,6 @@
 
 #include "patchfinder64.hpp"
 
-#include <liboffsetfinder64/libgeneral/macros.h>
 #include "all_liboffsetfinder.hpp"
 #include <string.h>
 
@@ -26,8 +25,8 @@ patchfinder64::patchfinder64(bool freeBuf) :
     _freeBuf(freeBuf),
     _buf(NULL),
     _bufSize(0),
-    _entrypoint(NULL),
-    _base(NULL)
+    _entrypoint(0ULL),
+    _base(0ULL)
 {
     //
 }
